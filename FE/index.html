@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FSM Controller</title>
+    <style>
+        .button {
+            margin: 5px;
+            padding: 10px;
+        }
+    
+        .status {
+            margin-top: 20px;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <h2>Event-Driven State Machine Controller</h2>
+    <button class="button" onclick="sendAction('start')">Start</button>
+    <button class="button" onclick="sendAction('stop')">Stop</button>
+    <button class="button" onclick="sendAction('reset')">Reset</button>
+    <div class="status">Current State: <span id="state">idle</span></div>
+    <script>
+        async function sendAction(action) {
+            const response = await fetch('/transition', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action })
+            });
+            const data = await response.json();
+            document.getElementById('state').innerText = data.state;
+        }
+        setInterval(async () => {
+            const response = await fetch('/state');
+            const data = await response.json();
+            document.getElementById('state').innerText = data.state;
+        }, 1000);
+    </script>
+</body>
+</html>
