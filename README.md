@@ -1,4 +1,5 @@
 # EventDrivenStateMachine
+<<<<<<< Updated upstream
 
 
 #  **README: Event-Driven State Machine**
@@ -146,3 +147,5 @@ CTRL + C
 ```
 
 ---
+=======
+>>>>>>> Stashed changes

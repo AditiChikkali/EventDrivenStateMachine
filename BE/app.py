@@ -6,27 +6,53 @@ import subprocess
 import os
 import socket
 import time
+import platform  # For OS detection
+import logging
+
+# ================================
+# 1. Configure Logging at the Top
+# ================================
+
+# Define the log file path
+log_file_path = os.path.join(os.path.dirname(__file__), "sample.log")
+
+# Create a custom logger
+logger = logging.getLogger("FSMLogger")
+logger.setLevel(logging.DEBUG)  # Log everything to console
+
+# Create handlers
+file_handler = logging.FileHandler(log_file_path, mode="a")
+file_handler.setLevel(logging.WARNING)  # Log only WARNING and above to file
+
+console_handler = logging.StreamHandler()
+console_handler.setLevel(logging.DEBUG)  # Log everything to console
+
+# Create formatters and add them to handlers
+formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
+file_handler.setFormatter(formatter)
+console_handler.setFormatter(formatter)
+
+# Add handlers to the logger
+logger.addHandler(file_handler)
+logger.addHandler(console_handler)
 
 # Initialize Flask app
 app = Flask(__name__, template_folder="../FE")
 
 # ================================
-# 1. Define Error Check Functions
+# 2. Define Error Check Functions
 # ================================
 
 
 def is_log_file_missing():
-    log_file_path = os.path.join(os.path.dirname(__file__), "sample.log")
     return not os.path.exists(log_file_path)
 
 
 def is_log_file_empty():
-    log_file_path = "sample.log"
     return os.path.exists(log_file_path) and os.path.getsize(log_file_path) == 0
 
 
 def is_log_file_too_large():
-    log_file_path = "sample.log"
     max_size = 10 * 1024 * 1024  # 10 MB
     return os.path.exists(log_file_path) and os.path.getsize(log_file_path) > max_size
 
@@ -39,17 +65,29 @@ def is_network_unavailable():
         return True
 
 
-# Command execution error check
+# Command execution error check (Cross-platform Fix)
 def execute_command():
     try:
-        subprocess.run(["tail", "-f", "sample.log"], check=True)
+        if platform.system() == "Windows":
+            subprocess.run(
+                ["powershell", "-Command", "Get-Content", log_file_path, "-Wait"],
+                check=True,
+            )
+        else:
+            subprocess.run(["tail", "-f", log_file_path], check=True)
     except subprocess.CalledProcessError:
-        print("[ERROR] Command execution error.")
+        logger.error("Command execution error.")
+        fsm.error()
+    except FileNotFoundError:
+        logger.error("Log file not found.")
+        fsm.error()
+    except PermissionError:
+        logger.error("Permission denied for log file.")
         fsm.error()
 
 
 # ================================
-# 2. Define FSM and States
+# 3. Define FSM and States
 # ================================
 
 states = ["idle", "starting", "running", "error", "stopping"]
@@ -66,7 +104,6 @@ class ServiceFSM:
 
         # Log state transitions
         for state in states:
-
             self.machine.add_transition(
                 trigger=f"on_enter_{state}",
                 source="*",
@@ -75,87 +112,83 @@ class ServiceFSM:
             )
 
     def after_state_change(self):
-        print(f"[INFO] Transitioned to {self.state} state.")
+        logger.info(f"Transitioned to {self.state} state.")
 
     def on_starting(self):
-        print("[INFO] Transitioning to starting...")
+        logger.info("Transitioning to starting...")
         if is_log_file_missing():
-            print("[ERROR] Log file not found.")
+            logger.error("Log file not found.")
             self.error()
             return
         if is_network_unavailable():
-            print("[ERROR] Network connectivity error.")
+            logger.error("Network connectivity error.")
             self.error()
             return
         threading.Timer(2.0, self.run).start()
 
     def on_running(self):
-        print("[INFO] Service is running...")
+        logger.info("Service is running...")
         threading.Thread(target=self.tail_log).start()
 
     def on_stopping(self):
-        print("[INFO] Entered on_stopping function.")
+        logger.info("Entered on_stopping function.")
         try:
-            print("[INFO] Stopping service...")
+            logger.info("Stopping service...")
             threading.Timer(2.0, self.reset).start()
-            print("[INFO] Reset timer started.")
+            logger.info("Reset timer started.")
         except Exception as e:
-            print(f"[ERROR] Exception in on_stopping: {e}")
+            logger.error(f"Exception in on_stopping: {e}")
             self.error()
 
     # ================================
-    # 3. Define Log Tailing with Error Handling
+    # 4. Define Log Tailing with Error Handling
     # ================================
     def tail_log(self):
-        log_file_path = os.path.join(os.path.dirname(__file__), "sample.log")
-
-        # Error checks before tailing the log
         if is_log_file_missing():
-            print("[ERROR] Log file not found.")
+            logger.error("Log file not found.")
             self.error()
             return
         if is_log_file_empty():
-            print("[ERROR] Log file is empty.")
+            logger.warning("Log file is empty.")
             self.error()
             return
         if is_log_file_too_large():
-            print("[ERROR] Log file size exceeded.")
+            logger.warning("Log file size exceeded.")
             self.error()
             return
         if is_network_unavailable():
-            print("[ERROR] Network connectivity error.")
+            logger.error("Network connectivity error.")
             self.error()
             return
 
-        # Proceed with tailing if no errors
         try:
             with open(log_file_path, "r") as file:
                 file.seek(0, 2)
                 while self.state == "running":
                     line = file.readline()
                     if line:
-                        print(line.strip())
+                        logger.info(line.strip())  # Log lines from file
                     else:
                         time.sleep(1)
         except FileNotFoundError:
-            print("[ERROR] Log file not found.")
+            logger.error("Log file not found.")
             self.error()
         except PermissionError:
-            print("[ERROR] Permission denied for log file.")
+            logger.error("Permission denied for log file.")
             self.error()
         except Exception as e:
-            print(f"[ERROR] Unexpected exception in tail service: {e}")
+            logger.error(f"Unexpected exception in tail service: {e}")
             self.error()
 
     def on_error(self):
-        print("[INFO] System has encountered an error. Waiting for reset.")
+        logger.info("System has encountered an error. Waiting for reset.")
 
 
 fsm = ServiceFSM()
 
 
 # ================================
-# 4. Flask Routes
+# 5. Flask Routes
 # ================================
 @app.route("/")
 def index():
@@ -164,24 +197,24 @@ def index():
 
 @app.route("/state", methods=["GET"])
 def get_state():
-    print(f"[DEBUG] Current state: {fsm.state}")
+    logger.debug(f"Current state: {fsm.state}")
     return jsonify({"state": fsm.state})
 
 
 @app.route("/transition", methods=["POST"])
 def transition():
     action = request.json.get("action")
-    print(f"[DEBUG] Received action: {action}")  # Log received action
+    logger.debug(f"Received action: {action}")
     if action in ["start", "stop", "reset"]:
         try:
-            print(f"[DEBUG] Executing action: {action}")  # Log action execution
+            logger.debug(f"Executing action: {action}")
             getattr(fsm, action)()
         except Exception as e:
-            print(f"[ERROR] Exception: {e}")  # Log exceptions
+            logger.error(f"Exception: {e}")
             fsm.error()
             return jsonify({"state": fsm.state, "error": str(e)}), 500
     else:
-        print("[ERROR] Invalid action received.")
+        logger.error("Invalid action received.")
     return jsonify({"state": fsm.state})
 
 
